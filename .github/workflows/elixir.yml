@@ -14,34 +14,19 @@ permissions:
 
 jobs:
   build:
-    name: Build and test - Erlang ${{matrix.otp}} / Elixir ${{matrix.elixir}}
+    name: Build and test - Erlang ${{matrix.otp}} / Elixir ${{matrix.elixir}} / ranch ${{matrix.ranch}}
     runs-on:  ${{matrix.os}}
     strategy:
       matrix:
+        ranch: ["1", "2"]
         # https://hexdocs.pm/elixir/compatibility-and-deprecations.html#compatibility-between-elixir-and-erlang-otp
         include:
           # Elixir 1.12: 22-24
-          - elixir: "1.12"
-            otp: "22.3"
-            os: "ubuntu-20.04"
-
-          - elixir: "1.12"
-            otp: "23.3"
-            os: "ubuntu-20.04"
-
           - elixir: "1.12"
             otp: "24.3"
             os: "ubuntu-22.04"
 
           # Elixir 1.13: 22-24
-          - elixir: "1.13.4"
-            otp: "22.3"
-            os: "ubuntu-20.04"
-
-          - elixir: "1.13.4"
-            otp: "23.3"
-            os: "ubuntu-20.04"
-
           - elixir: "1.13.4"
             otp: "24.3"
             os: "ubuntu-22.04"
@@ -51,10 +36,6 @@ jobs:
             os: "ubuntu-22.04"
 
           # Elixir 1.14: 23-25 (and 26 from v1.14.5)
-          - elixir: "1.14"
-            otp: "23.3"
-            os: "ubuntu-20.04"
-
           - elixir: "1.14"
             otp: "24.3"
             os: "ubuntu-22.04"
@@ -104,9 +85,14 @@ jobs:
       uses: actions/cache@v3
       with:
         path: deps
-        key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
-        restore-keys: ${{ runner.os }}-mix-
+        key: ${{ runner.os }}-mix-ranch${{ matrix.ranch }}-${{ hashFiles('**/mix.lock') }}
+        restore-keys: ${{ runner.os }}-mix-ranch${{ matrix.ranch }}-
     - name: Install dependencies
       run: mix deps.get
+    - name: Switch to ranch 1
+      if: matrix.ranch == '1'
+      run: mix deps.update ranch
+      env:
+        RANCH_VERSION: "~> 1.8.0"
     - name: Run tests
       run: mix test
