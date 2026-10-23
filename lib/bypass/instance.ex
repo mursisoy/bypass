@@ -467,8 +467,15 @@ defmodule Bypass.Instance do
     new_route(fun, build_path_match(path) |> elem(1), expected)
   end
 
+  # `brutal_kill`: a plug calling `Bypass.down/1` blocks on this instance while the instance
+  # waits for ranch to stop that plug's connection. With a graceful shutdown that cycle only
+  # breaks when ranch's shutdown timeout (5s) expires.
   defp cowboy_opts(port, ref, transport_options) do
-    [ref: ref, port: port, transport_options: [num_acceptors: 5] ++ transport_options]
+    [
+      ref: ref,
+      port: port,
+      transport_options: [num_acceptors: 5, shutdown: :brutal_kill] ++ transport_options
+    ]
   end
 
   # Use raw socket options to set SO_REUSEPORT so we fix {:error, :eaddrinuse} - where the OS errors
