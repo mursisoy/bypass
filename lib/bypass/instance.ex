@@ -25,7 +25,10 @@ defmodule Bypass.Instance do
 
   def init([opts]) do
     # Get a free port from the OS
-    case :ranch_tcp.listen(so_reuseport() ++ [ip: listen_ip(), port: Keyword.get(opts, :port, 0)]) do
+    case :gen_tcp.listen(
+           Keyword.get(opts, :port, 0),
+           so_reuseport() ++ [ip: listen_ip(), reuseaddr: true]
+         ) do
       {:ok, socket} ->
         {:ok, port} = :inet.port(socket)
         :erlang.port_close(socket)
@@ -340,11 +343,37 @@ defmodule Bypass.Instance do
 
   defp do_up(port, ref) do
     plug_opts = [bypass_instance: self()]
-    {:ok, socket} = :ranch_tcp.listen(so_reuseport() ++ [ip: listen_ip(), port: port])
-    cowboy_opts = cowboy_opts(port, ref, socket)
-    {:ok, _pid} = Plug.Cowboy.http(Bypass.Plug, plug_opts, cowboy_opts)
-    socket
+
+    if ranch_1?() do
+      {:ok, socket} = :ranch_tcp.listen(so_reuseport() ++ [ip: listen_ip(), port: port])
+      cowboy_opts = cowboy_opts(port, ref, socket: socket)
+      {:ok, _pid} = Plug.Cowboy.http(Bypass.Plug, plug_opts, cowboy_opts)
+      socket
+    else
+      # Ranch 2 dropped the `socket` transport option. Let ranch open the socket and hand it back
+      # to us, so `do_down/2` can still close it synchronously.
+      instance = self()
+
+      post_listen_callback = fn socket ->
+        send(instance, {:listen_socket, ref, socket})
+        :ok
+      end
+
+      cowboy_opts =
+        cowboy_opts(port, ref,
+          socket_opts: so_reuseport() ++ [ip: listen_ip()],
+          post_listen_callback: post_listen_callback
+        )
+
+      {:ok, _pid} = Plug.Cowboy.http(Bypass.Plug, plug_opts, cowboy_opts)
+
+      receive do
+        {:listen_socket, ^ref, socket} -> socket
+      end
+    end
   end
+
+  defp ranch_1?, do: match?("1." <> _, to_string(Application.spec(:ranch, :vsn)))
 
   defp do_down(ref, socket) do
     :ok = Plug.Cowboy.shutdown(ref)
@@ -438,8 +467,8 @@ defmodule Bypass.Instance do
     new_route(fun, build_path_match(path) |> elem(1), expected)
   end
 
-  defp cowboy_opts(port, ref, socket) do
-    [ref: ref, port: port, transport_options: [num_acceptors: 5, socket: socket]]
+  defp cowboy_opts(port, ref, transport_options) do
+    [ref: ref, port: port, transport_options: [num_acceptors: 5] ++ transport_options]
   end
 
   # Use raw socket options to set SO_REUSEPORT so we fix {:error, :eaddrinuse} - where the OS errors
